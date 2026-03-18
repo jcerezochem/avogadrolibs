@@ -87,6 +87,31 @@ static QString xAxisTitleForConstraint(const Core::Constraint& c)
   }
 }
 
+static void unwrapPeriodicSeries(DataSeries& values, float period)
+{
+  if (values.empty() || period <= 0.0f)
+    return;
+
+  const float halfPeriod = period * 0.5f;
+  float offset = 0.0f;
+  float previous = values[0];
+
+  for (size_t i = 1; i < values.size(); ++i) {
+    float current = values[i] + offset;
+    const float delta = current - previous;
+    if (delta > halfPeriod) {
+      offset -= period;
+      current -= period;
+    } else if (delta < -halfPeriod) {
+      offset += period;
+      current += period;
+    }
+
+    values[i] = current;
+    previous = current;
+  }
+}
+
 int PlotConformer::currentConformerIndex() const
 {
   if (!m_molecule || m_molecule->coordinate3dCount() == 0)
@@ -361,6 +386,7 @@ void PlotConformer::updatePlot()
   DataSeries xData, yData;
   const Array<Vector3> originalPositions = m_molecule->atomPositions3d();
   const int currentIndex = currentConformerIndex();
+  const int xMode = (m_xAxisCombo ? m_xAxisCombo->currentData().toInt() : -1);
 
   QString plotType = m_propertyCombo->currentData().toString();
 
@@ -377,6 +403,15 @@ void PlotConformer::updatePlot()
   if (xData.empty() || yData.empty())
     return;
 
+  if (xMode >= 0) {
+    const auto& constraints = m_molecule->constraints();
+    if (xMode < static_cast<int>(constraints.size()) &&
+        constraints[static_cast<size_t>(xMode)].type() ==
+          Core::Constraint::TorsionConstraint) {
+      unwrapPeriodicSeries(xData, 360.0f);
+    }
+  }
+
   m_molecule->setAtomPositions3d(originalPositions);
   m_lastXData = xData;
 
@@ -384,8 +419,6 @@ void PlotConformer::updatePlot()
   float min = *std::min_element(yData.begin(), yData.end());
   float max = *std::max_element(yData.begin(), yData.end());
 
-  const int xMode = (m_xAxisCombo ? m_xAxisCombo->currentData().toInt() : -1);
-  
   QString xTitle = tr("Frame");
   if (xMode >= 0) {
     const auto& constraints = m_molecule->constraints();
