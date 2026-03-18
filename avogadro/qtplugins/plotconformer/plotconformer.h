@@ -9,6 +9,7 @@
 #include <avogadro/qtgui/extensionplugin.h>
 
 #include <QDialog>
+#include <QCheckBox>
 #include <QComboBox>
 
 #include <memory>
@@ -77,6 +78,7 @@ private:
   QComboBox* m_unitsCombo;
   QComboBox* m_targetUnitsCombo;
   QComboBox* m_xAxisCombo;
+  QCheckBox* m_unwrapDihedralsCheck = nullptr;
   DataSeries m_lastXData;
 };
 

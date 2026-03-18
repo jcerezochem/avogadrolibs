@@ -12,6 +12,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
 
@@ -110,6 +111,49 @@ static void unwrapPeriodicSeries(DataSeries& values, float period)
     values[i] = current;
     previous = current;
   }
+}
+
+static void shiftSeriesToPreferredWindow(DataSeries& values, float period,
+                                         float minimum, float maximum)
+{
+  if (values.empty() || period <= 0.0f || minimum >= maximum)
+    return;
+
+  const float minShift =
+    std::floor((*std::min_element(values.begin(), values.end()) - maximum) /
+               period) *
+    period;
+  const float maxShift =
+    std::ceil((*std::max_element(values.begin(), values.end()) - minimum) /
+              period) *
+    period;
+
+  int bestCount = -1;
+  float bestShift = 0.0f;
+  float bestCenterDistance = std::numeric_limits<float>::max();
+  const float preferredCenter = 0.5f * (minimum + maximum);
+
+  for (float shift = minShift; shift <= maxShift; shift += period) {
+    int count = 0;
+    float centerDistance = 0.0f;
+    for (float value : values) {
+      const float shifted = value - shift;
+      if (shifted >= minimum && shifted <= maximum) {
+        ++count;
+        centerDistance += std::fabs(shifted - preferredCenter);
+      }
+    }
+
+    if (count > bestCount ||
+        (count == bestCount && centerDistance < bestCenterDistance)) {
+      bestCount = count;
+      bestShift = shift;
+      bestCenterDistance = centerDistance;
+    }
+  }
+
+  for (float& value : values)
+    value -= bestShift;
 }
 
 int PlotConformer::currentConformerIndex() const
@@ -332,6 +376,11 @@ void PlotConformer::displayDialog()
     xAxisLayout->addStretch();
     mainLayout->addLayout(xAxisLayout);
 
+    m_unwrapDihedralsCheck =
+      new QCheckBox(tr("Unwrap dihedral scans"), m_dialog.get());
+    m_unwrapDihedralsCheck->setChecked(true);
+    mainLayout->addWidget(m_unwrapDihedralsCheck);
+
     // Create energy conversion layout
     QHBoxLayout* conversionLayout = new QHBoxLayout();
     QLabel* conversionLabel = new QLabel(tr("Energy Units:"), m_dialog.get());
@@ -370,6 +419,8 @@ void PlotConformer::displayDialog()
             &PlotConformer::updatePlot);
     connect(m_xAxisCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &PlotConformer::updatePlot);
+    connect(m_unwrapDihedralsCheck, &QCheckBox::toggled, this,
+            &PlotConformer::updatePlot);
   }
 
   updatePlot();
@@ -403,14 +454,22 @@ void PlotConformer::updatePlot()
   if (xData.empty() || yData.empty())
     return;
 
+  bool isDihedralConstraint = false;
   if (xMode >= 0) {
     const auto& constraints = m_molecule->constraints();
     if (xMode < static_cast<int>(constraints.size()) &&
         constraints[static_cast<size_t>(xMode)].type() ==
           Core::Constraint::TorsionConstraint) {
-      unwrapPeriodicSeries(xData, 360.0f);
+      isDihedralConstraint = true;
+      if (m_unwrapDihedralsCheck && m_unwrapDihedralsCheck->isChecked()) {
+        unwrapPeriodicSeries(xData, 360.0f);
+        shiftSeriesToPreferredWindow(xData, 360.0f, -180.0f, 180.0f);
+      }
     }
   }
+
+  if (m_unwrapDihedralsCheck)
+    m_unwrapDihedralsCheck->setEnabled(isDihedralConstraint);
 
   m_molecule->setAtomPositions3d(originalPositions);
   m_lastXData = xData;
