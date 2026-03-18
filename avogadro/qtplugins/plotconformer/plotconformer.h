@@ -52,6 +52,8 @@ private slots:
   void clicked(float x, float y, Qt::KeyboardModifiers modifiers);
 
 private:
+  int currentConformerIndex() const;
+
   // Generate RMSD data from a coordinate set
   // Writes the results to @p x and @p y
   void generateRmsdCurve(DataSeries& x, DataSeries& y);
