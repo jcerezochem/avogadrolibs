@@ -20,6 +20,10 @@
 #include <avogadro/qtgui/molecule.h>
 #include <avogadro/qtgui/chartdialog.h>
 #include <avogadro/qtgui/chartwidget.h>
+#include <avogadro/core/constraint.h>
+#include <cmath>
+#include <limits>
+#include <avogadro/core/vector.h>
 
 using Avogadro::QtGui::Molecule;
 
@@ -30,6 +34,107 @@ constexpr double EvToKcal = 23.06054;
 constexpr double KcalToKJ = 4.184; // by definition
 
 using Core::Array;
+
+static float clampf(float v, float lo, float hi)
+{
+  return std::max(lo, std::min(hi, v));
+}
+
+static float distance_aa(const Vector3& a, const Vector3& b)
+{
+  return static_cast<float>((a - b).norm());
+}
+
+static float angle_deg(const Vector3& a, const Vector3& b, const Vector3& c)
+{
+  const Vector3 ba = a - b;
+  const Vector3 bc = c - b;
+
+  const double nba = ba.norm();
+  const double nbc = bc.norm();
+  if (nba == 0.0 || nbc == 0.0)
+    return 0.0f;
+
+  float cosang = static_cast<float>(ba.dot(bc) / (nba * nbc));
+  cosang = clampf(cosang, -1.0f, 1.0f);
+  return static_cast<float>(std::acos(cosang) * 180.0 / M_PI);
+}
+
+static float dihedral_deg(const Vector3& a, const Vector3& b, const Vector3& c,
+                          const Vector3& d)
+{
+  const Vector3 b1 = b - a;
+  const Vector3 b2 = c - b;
+  const Vector3 b3 = d - c;
+
+  Vector3 n1 = b1.cross(b2);
+  Vector3 n2 = b2.cross(b3);
+
+  const double n1n = n1.norm();
+  const double n2n = n2.norm();
+  const double b2n = b2.norm();
+  if (n1n == 0.0 || n2n == 0.0 || b2n == 0.0)
+    return 0.0f;
+
+  n1 /= n1n;
+  n2 /= n2n;
+
+  const Vector3 m1 = n1.cross(b2 / b2n);
+
+  const double x = n1.dot(n2);
+  const double y = m1.dot(n2);
+  return static_cast<float>(std::atan2(y, x) * 180.0 / M_PI);
+}
+
+static QString constraintLabel(const Core::Constraint& c)
+{
+  const int a = static_cast<int>(c.aIndex()) + 1;
+  const int b = static_cast<int>(c.bIndex()) + 1;
+  const int cc = static_cast<int>(c.cIndex()) + 1;
+  const int d = static_cast<int>(c.dIndex()) + 1;
+
+  switch (c.type()) {
+    case Core::Constraint::DistanceConstraint:
+      return QObject::tr("Distance %1-%2").arg(a).arg(b);
+    case Core::Constraint::AngleConstraint:
+      return QObject::tr("Angle %1-%2-%3").arg(a).arg(b).arg(cc);
+    case Core::Constraint::TorsionConstraint:
+      return QObject::tr("Dihedral %1-%2-%3-%4").arg(a).arg(b).arg(cc).arg(d);
+    default:
+      return QObject::tr("Constraint");
+  }
+}
+
+static float constraintValue(QtGui::Molecule& mol, const Core::Constraint& c)
+{
+  const Array<Vector3> pos = mol.atomPositions3d();
+  auto at = [&](auto idx) -> const Vector3& { return pos[static_cast<size_t>(idx)]; };
+
+  switch (c.type()) {
+    case Core::Constraint::DistanceConstraint:
+      return distance_aa(at(c.aIndex()), at(c.bIndex()));
+    case Core::Constraint::AngleConstraint:
+      return angle_deg(at(c.aIndex()), at(c.bIndex()), at(c.cIndex()));
+    case Core::Constraint::TorsionConstraint:
+      return dihedral_deg(at(c.aIndex()), at(c.bIndex()), at(c.cIndex()), at(c.dIndex()));
+    default:
+      return 0.0f;
+  }
+}
+
+static QString xAxisTitleForConstraint(const Core::Constraint& c)
+{
+  switch (c.type()) {
+    case Core::Constraint::DistanceConstraint:
+      return QObject::tr("Bond length (Å)");
+    case Core::Constraint::AngleConstraint:
+      return QObject::tr("Angle (°)");
+    case Core::Constraint::TorsionConstraint:
+      return QObject::tr("Dihedral (°)");
+    default:
+      return QObject::tr("Frame");
+  }
+}
 
 PlotConformer::PlotConformer(QObject* parent_)
   : Avogadro::QtGui::ExtensionPlugin(parent_), m_actions(QList<QAction*>()),
@@ -104,13 +209,39 @@ void PlotConformer::updateActions()
 
 void PlotConformer::clicked(float x, float y, Qt::KeyboardModifiers modifiers)
 {
-  // switch to the closest conformer to x
-  int conformer = static_cast<int>(x);
+//  // switch to the closest conformer to x
+//  int conformer = static_cast<int>(x);
+//  if (conformer < 0)
+//    conformer = 0;
+//  if (conformer >= m_molecule->coordinate3dCount())
+//    conformer = m_molecule->coordinate3dCount() - 1;
+//  m_molecule->setCoordinate3d(conformer);
+//  m_molecule->emitChanged(Molecule::Atoms);
+  if (!m_molecule)
+    return;
+  
+  const int xMode = (m_xAxisCombo ? m_xAxisCombo->currentData().toInt() : -1);
+  
+  int conformer = 0;
+  if (xMode < 0) {
+    conformer = static_cast<int>(x);
+  } else if (!m_lastXData.empty()) {
+    float best = std::numeric_limits<float>::max();
+    for (int i = 0; i < static_cast<int>(m_lastXData.size()); ++i) {
+      const float d = std::fabs(m_lastXData[static_cast<size_t>(i)] - x);
+      if (d < best) {
+        best = d;
+        conformer = i;
+      }
+    }
+  }
+  
   if (conformer < 0)
     conformer = 0;
-  if (conformer >= m_molecule->coordinate3dCount())
-    conformer = m_molecule->coordinate3dCount() - 1;
-  m_currentFrame = conformer;
+  const int maxIdx = static_cast<int>(m_molecule->coordinate3dCount()) - 1;
+  if (conformer > maxIdx)
+    conformer = maxIdx;
+  
   m_molecule->setCoordinate3d(conformer);
   m_molecule->emitChanged(Molecule::Atoms);
   updatePlot();
@@ -156,6 +287,30 @@ void PlotConformer::displayDialog()
     propertyLayout->addStretch();
     mainLayout->addLayout(propertyLayout);
 
+    // X axis selection (Frame or constraint coordinate)
+    QHBoxLayout* xAxisLayout = new QHBoxLayout();
+    QLabel* xAxisLabel = new QLabel(tr("X Axis:"), m_dialog.get());
+    m_xAxisCombo = new QComboBox(m_dialog.get());
+    
+    m_xAxisCombo->addItem(tr("Frame"), -1);
+    
+    if (m_molecule) {
+      const auto& constraints = m_molecule->constraints();
+      for (int i = 0; i < static_cast<int>(constraints.size()); ++i) {
+        const auto& c = constraints[static_cast<size_t>(i)];
+        if (c.type() == Core::Constraint::DistanceConstraint ||
+            c.type() == Core::Constraint::AngleConstraint ||
+            c.type() == Core::Constraint::TorsionConstraint) {
+          m_xAxisCombo->addItem(constraintLabel(c), i);
+        }
+      }
+    }
+    
+    xAxisLayout->addWidget(xAxisLabel);
+    xAxisLayout->addWidget(m_xAxisCombo);
+    xAxisLayout->addStretch();
+    mainLayout->addLayout(xAxisLayout);
+
     // Create energy conversion layout
     QHBoxLayout* conversionLayout = new QHBoxLayout();
     QLabel* conversionLabel = new QLabel(tr("Energy Units:"), m_dialog.get());
@@ -192,6 +347,8 @@ void PlotConformer::displayDialog()
     connect(m_targetUnitsCombo,
             QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             &PlotConformer::updatePlot);
+    connect(m_xAxisCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &PlotConformer::updatePlot);
   }
 
   updatePlot();
@@ -219,11 +376,23 @@ void PlotConformer::updatePlot()
     generateVelocitiesCurve(xData, yData);
   }
 
+  if (xData.empty() || yData.empty())
+    return;
+  
+  m_lastXData = xData;
+
   // Now generate a plot with the data
   float min = *std::min_element(yData.begin(), yData.end());
   float max = *std::max_element(yData.begin(), yData.end());
 
-  const char* xTitle = "Frame";
+  const int xMode = (m_xAxisCombo ? m_xAxisCombo->currentData().toInt() : -1);
+  
+  QString xTitle = tr("Frame");
+  if (xMode >= 0) {
+    const auto& constraints = m_molecule->constraints();
+    if (xMode < static_cast<int>(constraints.size()))
+      xTitle = xAxisTitleForConstraint(constraints[static_cast<size_t>(xMode)]);
+  }
   QString yTitle;
 
   if (plotType == "rmsd") {
@@ -255,6 +424,15 @@ void PlotConformer::updatePlot()
   m_chartWidget->setXAxisLimits(
     -0.1, static_cast<float>(m_molecule->coordinate3dCount()) - 0.9);
   m_chartWidget->setYAxisLimits(min, max * 1.1f);
+  if (xMode < 0) {
+    m_chartWidget->setXAxisLimits(
+      -0.1f, static_cast<float>(m_molecule->coordinate3dCount()) - 0.9f);
+  } else {
+    const float xmin = *std::min_element(xData.begin(), xData.end());
+    const float xmax = *std::max_element(xData.begin(), xData.end());
+    const float pad = std::max(1e-3f, (xmax - xmin) * 0.02f);
+    m_chartWidget->setXAxisLimits(xmin - pad, xmax + pad);
+  }
   m_chartWidget->setXAxisTitle(xTitle);
   m_chartWidget->setYAxisTitle(yTitle);
 }
@@ -305,8 +483,17 @@ void PlotConformer::generateEnergyCurve(DataSeries& x, DataSeries& y)
     double relativeE = energies[entry] - minEnergy;
     // Convert: first to kcal/mol, then to target units
     relativeE = relativeE * fromFactor * toFactor;
-
-    x.push_back(static_cast<double>(entry));
+    // Set molecule corresponding to table entry and get coordinate value
+    m_molecule->setCoordinate3d(entry);
+    
+    float xVal = static_cast<float>(entry); // default: frame
+    const int xMode = (m_xAxisCombo ? m_xAxisCombo->currentData().toInt() : -1);
+    const auto& constraints = m_molecule->constraints();
+    if (xMode >= 0 && xMode < static_cast<int>(constraints.size())) {
+      xVal = constraintValue(*m_molecule, constraints[static_cast<size_t>(xMode)]);
+    }
+    
+    x.push_back(xVal);
     y.push_back(relativeE);
   }
 }

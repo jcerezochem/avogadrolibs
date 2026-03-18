@@ -74,7 +74,8 @@ private:
   QComboBox* m_propertyCombo;
   QComboBox* m_unitsCombo;
   QComboBox* m_targetUnitsCombo;
-  int m_currentFrame = 0;
+  QComboBox* m_xAxisCombo;
+  DataSeries m_lastXData;
 };
 
 inline QString PlotConformer::description() const
