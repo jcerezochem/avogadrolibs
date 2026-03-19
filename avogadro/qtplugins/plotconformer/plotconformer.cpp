@@ -6,16 +6,22 @@
 #include "plotconformer.h"
 
 #include <QAction>
-#include <QCheckBox>
-#include <QComboBox>
+#include <QMessageBox>
+#include <QProcess>
+#include <QString>
+#include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QVBoxLayout>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QLineEdit>
 
 #include <avogadro/core/array.h>
 #include <avogadro/core/angletools.h>
 #include <avogadro/core/constraint.h>
 #include <avogadro/core/vector.h>
+#include <avogadro/io/fileformatmanager.h>
+#include <avogadro/qtgui/chartdialog.h>
 #include <avogadro/qtgui/chartwidget.h>
 #include <avogadro/qtgui/molecule.h>
 #include <cmath>
@@ -300,11 +306,19 @@ void PlotConformer::updateActions()
 
 void PlotConformer::clicked(float x, float y, Qt::KeyboardModifiers modifiers)
 {
+//  // switch to the closest conformer to x
+//  int conformer = static_cast<int>(x);
+//  if (conformer < 0)
+//    conformer = 0;
+//  if (conformer >= m_molecule->coordinate3dCount())
+//    conformer = m_molecule->coordinate3dCount() - 1;
+//  m_molecule->setCoordinate3d(conformer);
+//  m_molecule->emitChanged(Molecule::Atoms);
   if (!m_molecule)
     return;
-
+  
   const int xMode = (m_xAxisCombo ? m_xAxisCombo->currentData().toInt() : -1);
-
+  
   int conformer = 0;
   if (xMode < 0) {
     conformer = static_cast<int>(x);
@@ -318,13 +332,13 @@ void PlotConformer::clicked(float x, float y, Qt::KeyboardModifiers modifiers)
       }
     }
   }
-
+  
   if (conformer < 0)
     conformer = 0;
   const int maxIdx = static_cast<int>(m_molecule->coordinate3dCount()) - 1;
   if (conformer > maxIdx)
     conformer = maxIdx;
-
+  
   m_molecule->setCoordinate3d(conformer);
   m_molecule->emitChanged(Molecule::Atoms);
   updatePlot();

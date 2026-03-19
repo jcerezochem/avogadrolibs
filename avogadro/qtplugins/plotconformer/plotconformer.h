@@ -8,11 +8,11 @@
 
 #include <avogadro/qtgui/extensionplugin.h>
 
-#include <memory>
+#include <QDialog>
+#include <QCheckBox>
+#include <QComboBox>
 
-class QCheckBox;
-class QComboBox;
-class QDialog;
+#include <memory>
 
 namespace Avogadro {
 
