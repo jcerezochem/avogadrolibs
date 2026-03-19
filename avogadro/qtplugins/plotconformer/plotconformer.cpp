@@ -532,6 +532,9 @@ void PlotConformer::generateRmsdCurve(DataSeries& x, DataSeries& y)
     return;
 
   const Array<Vector3> ref = m_molecule->coordinate3d(0);
+  const Array<Vector3> originalPositions = m_molecule->atomPositions3d();
+  const int xMode = (m_xAxisCombo ? m_xAxisCombo->currentData().toInt() : -1);
+  const auto& constraints = m_molecule->constraints();
 
   for (int i = 0; i < m_molecule->coordinate3dCount(); ++i) {
     const Array<Vector3> positions = m_molecule->coordinate3d(i);
@@ -542,9 +545,18 @@ void PlotConformer::generateRmsdCurve(DataSeries& x, DataSeries& y)
              (positions[j][2] - ref[j][2]) * (positions[j][2] - ref[j][2]);
     }
     sum = sqrt(sum / m_molecule->coordinate3dCount());
-    x.push_back(i);
+
+    float xVal = static_cast<float>(i);
+    if (xMode >= 0 && xMode < static_cast<int>(constraints.size())) {
+      m_molecule->setCoordinate3d(i);
+      xVal = constraintValue(*m_molecule, constraints[static_cast<size_t>(xMode)]);
+    }
+
+    x.push_back(xVal);
     y.push_back(sum);
   }
+
+  m_molecule->setAtomPositions3d(originalPositions);
 }
 
 void PlotConformer::generateEnergyCurve(DataSeries& x, DataSeries& y)
