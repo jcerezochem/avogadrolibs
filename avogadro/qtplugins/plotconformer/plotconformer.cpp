@@ -195,6 +195,36 @@ int PlotConformer::currentConformerIndex() const
   return bestIndex;
 }
 
+void PlotConformer::updateXAxisOptions()
+{
+  if (!m_xAxisCombo)
+    return;
+
+  const QVariant currentData = m_xAxisCombo->currentData();
+
+  m_xAxisCombo->blockSignals(true);
+  m_xAxisCombo->clear();
+  m_xAxisCombo->addItem(tr("Frame"), -1);
+
+  if (m_molecule) {
+    const auto& constraints = m_molecule->constraints();
+    for (int i = 0; i < static_cast<int>(constraints.size()); ++i) {
+      const auto& c = constraints[static_cast<size_t>(i)];
+      if (c.type() == Core::Constraint::DistanceConstraint ||
+          c.type() == Core::Constraint::AngleConstraint ||
+          c.type() == Core::Constraint::TorsionConstraint) {
+        m_xAxisCombo->addItem(constraintLabel(c), i);
+      }
+    }
+  }
+
+  int index = m_xAxisCombo->findData(currentData);
+  if (index < 0)
+    index = 0;
+  m_xAxisCombo->setCurrentIndex(index);
+  m_xAxisCombo->blockSignals(false);
+}
+
 PlotConformer::PlotConformer(QObject* parent_)
   : Avogadro::QtGui::ExtensionPlugin(parent_), m_actions(QList<QAction*>()),
     m_molecule(nullptr), m_displayDialogAction(new QAction(this))
@@ -249,6 +279,8 @@ void PlotConformer::moleculeChanged(unsigned int c)
   if (m_dialog &&
       (changes & Molecule::Atoms || changes & Molecule::Constraints ||
        changes & Molecule::Properties)) {
+    if (changes & Molecule::Constraints)
+      updateXAxisOptions();
     updatePlot();
   }
 }
@@ -356,21 +388,7 @@ void PlotConformer::displayDialog()
     QHBoxLayout* xAxisLayout = new QHBoxLayout();
     QLabel* xAxisLabel = new QLabel(tr("X Axis:"), m_dialog.get());
     m_xAxisCombo = new QComboBox(m_dialog.get());
-    
-    m_xAxisCombo->addItem(tr("Frame"), -1);
-    
-    if (m_molecule) {
-      const auto& constraints = m_molecule->constraints();
-      for (int i = 0; i < static_cast<int>(constraints.size()); ++i) {
-        const auto& c = constraints[static_cast<size_t>(i)];
-        if (c.type() == Core::Constraint::DistanceConstraint ||
-            c.type() == Core::Constraint::AngleConstraint ||
-            c.type() == Core::Constraint::TorsionConstraint) {
-          m_xAxisCombo->addItem(constraintLabel(c), i);
-        }
-      }
-    }
-    
+
     xAxisLayout->addWidget(xAxisLabel);
     xAxisLayout->addWidget(m_xAxisCombo);
     xAxisLayout->addStretch();
@@ -423,6 +441,7 @@ void PlotConformer::displayDialog()
             &PlotConformer::updatePlot);
   }
 
+  updateXAxisOptions();
   updatePlot();
   m_dialog->show();
   m_dialog->raise();

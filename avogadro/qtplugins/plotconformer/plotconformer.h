@@ -54,6 +54,7 @@ private slots:
 
 private:
   int currentConformerIndex() const;
+  void updateXAxisOptions();
 
   // Generate RMSD data from a coordinate set
   // Writes the results to @p x and @p y
