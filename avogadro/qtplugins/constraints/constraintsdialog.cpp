@@ -30,12 +30,21 @@ ConstraintsDialog::ConstraintsDialog(QWidget* parent_, Qt::WindowFlags f)
   connect(ui->addConstraint, SIGNAL(clicked()), this, SLOT(addConstraint()));
   connect(ui->getConstraint, SIGNAL(clicked()), this,
           SLOT(getConstraint()));
+  connect(ui->loadConstraint, SIGNAL(clicked()), this,
+          SLOT(loadConstraint()));
   connect(ui->deleteConstraint, SIGNAL(clicked()), this,
           SLOT(deleteConstraint()));
   connect(ui->deleteAllConstraints, SIGNAL(clicked()), this,
           SLOT(deleteAllConstraints()));
+  connect(ui->enableScan, SIGNAL(toggled(bool)), ui->editScanInitial,
+          SLOT(setEnabled(bool)));
+  connect(ui->enableScan, SIGNAL(toggled(bool)), ui->editScanEnd,
+          SLOT(setEnabled(bool)));
+  connect(ui->enableScan, SIGNAL(toggled(bool)), ui->editScanSteps,
+          SLOT(setEnabled(bool)));
 
   changeType(0);
+  resetScanEditor();
 
   // TODO use sort model
   auto* proxyModel = new QSortFilterProxyModel(this);
@@ -57,6 +66,8 @@ ConstraintsDialog::ConstraintsDialog(QWidget* parent_, Qt::WindowFlags f)
   connect(view->selectionModel(),
           SIGNAL(currentChanged(const QModelIndex&, const QModelIndex&)), this,
           SLOT(highlightSelected(const QModelIndex&, const QModelIndex&)));
+  connect(ui->editValue, SIGNAL(valueChanged(double)), this,
+          SLOT(syncScanEditorValue(double)));
 }
 
 ConstraintsDialog::~ConstraintsDialog()
@@ -71,12 +82,15 @@ void ConstraintsDialog::setMolecule(QtGui::Molecule* molecule)
   m_model->setConstraints(molecule->constraints());
 
   connect(m_molecule, SIGNAL(changed(unsigned int)), this,
-          SLOT(updateConstraints()));
+          SLOT(updateConstraints()), Qt::UniqueConnection);
 }
 
 void ConstraintsDialog::highlightSelected(const QModelIndex& newIndex,
                                           const QModelIndex& oldIndex)
 {
+  Q_UNUSED(newIndex);
+  Q_UNUSED(oldIndex);
+
   // get the selected row in the table
   auto row = ui->constraintsTableView->currentIndex().row();
   m_model->currentRow = row;
@@ -86,6 +100,8 @@ void ConstraintsDialog::highlightSelected(const QModelIndex& newIndex,
   auto constraint = m_model->constraint(row);
   if (constraint.type() == Constraint::None)
     return;
+
+  populateEditor(constraint);
 
   // unselect everything else in the molecule
   for (Index i = 0; i < m_molecule->atomCount(); ++i)
@@ -236,12 +252,20 @@ void ConstraintsDialog::updateConstraints()
     Vector3 b = m_molecule->atomPosition3d(selectedAtoms[1]);
     double distance = (a - b).norm();
     ui->editValue->setValue(distance);
+    if (!ui->enableScan->isChecked()) {
+      ui->editScanInitial->setValue(distance);
+      ui->editScanEnd->setValue(distance);
+    }
   } else if (selectedAtoms.size() == 3) {
     Vector3 a = m_molecule->atomPosition3d(selectedAtoms[0]);
     Vector3 b = m_molecule->atomPosition3d(selectedAtoms[1]);
     Vector3 c = m_molecule->atomPosition3d(selectedAtoms[2]);
     double angle = calculateAngle(a, b, c);
     ui->editValue->setValue(angle);
+    if (!ui->enableScan->isChecked()) {
+      ui->editScanInitial->setValue(angle);
+      ui->editScanEnd->setValue(angle);
+    }
   } else if (selectedAtoms.size() == 4) {
     // todo detect if torsion or out-of-plane bending
     Vector3 a = m_molecule->atomPosition3d(selectedAtoms[0]);
@@ -250,7 +274,124 @@ void ConstraintsDialog::updateConstraints()
     Vector3 d = m_molecule->atomPosition3d(selectedAtoms[3]);
     double dihedral = calculateDihedral(a, b, c, d);
     ui->editValue->setValue(dihedral);
+    if (!ui->enableScan->isChecked()) {
+      ui->editScanInitial->setValue(dihedral);
+      ui->editScanEnd->setValue(dihedral);
+    }
   }
+}
+
+void ConstraintsDialog::resetScanEditor()
+{
+  ui->enableScan->setChecked(false);
+  ui->editScanInitial->setValue(ui->editValue->value());
+  ui->editScanEnd->setValue(ui->editValue->value());
+  ui->editScanSteps->setValue(2);
+}
+
+void ConstraintsDialog::syncScanEditorValue(double value)
+{
+  if (!ui->enableScan->isChecked()) {
+    ui->editScanInitial->setValue(value);
+    ui->editScanEnd->setValue(value);
+  }
+}
+
+void ConstraintsDialog::populateEditor(const Constraint& constraint)
+{
+  switch (constraint.type()) {
+    case Constraint::AngleConstraint:
+      changeType(1);
+      break;
+    case Constraint::TorsionConstraint:
+      changeType(2);
+      break;
+    case Constraint::DistanceConstraint:
+    default:
+      changeType(0);
+      break;
+  }
+
+  ui->editA->setValue(constraint.aIndex() != MaxIndex ? constraint.aIndex() + 1 : 0);
+  ui->editB->setValue(constraint.bIndex() != MaxIndex ? constraint.bIndex() + 1 : 0);
+  ui->editC->setValue(constraint.cIndex() != MaxIndex ? constraint.cIndex() + 1 : 0);
+  ui->editD->setValue(constraint.dIndex() != MaxIndex ? constraint.dIndex() + 1 : 0);
+  ui->editValue->setValue(constraint.value());
+
+  if (constraint.hasScan()) {
+    ui->enableScan->setChecked(true);
+    ui->editScanInitial->setValue(constraint.scanInitial());
+    ui->editScanEnd->setValue(constraint.scanEnd());
+    ui->editScanSteps->setValue(constraint.scanSteps());
+  } else {
+    resetScanEditor();
+    ui->editScanInitial->setValue(constraint.value());
+    ui->editScanEnd->setValue(constraint.value());
+  }
+}
+
+bool ConstraintsDialog::buildConstraintFromEditor(Constraint& constraint) const
+{
+  Constraint::Type type;
+  switch (ui->comboType->currentIndex()) {
+    case 1:
+      type = Constraint::AngleConstraint;
+      break;
+    case 2:
+      type = Constraint::TorsionConstraint;
+      break;
+    case 0:
+    default:
+      type = Constraint::DistanceConstraint;
+      break;
+  }
+
+  double value = ui->editValue->value();
+  int atomIdA = ui->editA->value();
+  int atomIdB = ui->editB->value();
+  int atomIdC = ui->editC->value();
+  int atomIdD = ui->editD->value();
+
+  Index a, b, c, d;
+  if (atomIdA < 1 || atomIdA > static_cast<int>(m_molecule->atomCount()))
+    return false;
+  else
+    a = atomIdA - 1;
+
+  if (atomIdB < 1 || atomIdB > static_cast<int>(m_molecule->atomCount()))
+    return false;
+  else
+    b = atomIdB - 1;
+
+  if (atomIdC < 1 || atomIdC > static_cast<int>(m_molecule->atomCount()))
+    c = MaxIndex;
+  else
+    c = atomIdC - 1;
+
+  if (atomIdD < 1 || atomIdD > static_cast<int>(m_molecule->atomCount()))
+    d = MaxIndex;
+  else
+    d = atomIdD - 1;
+
+  if (type == Constraint::DistanceConstraint) {
+    if (a == b || value == 0.0)
+      return false;
+  } else if (type == Constraint::AngleConstraint) {
+    if (a == b || b == c)
+      return false;
+  } else if (type == Constraint::TorsionConstraint) {
+    if (a == b || a == c || a == d || b == c || b == d || c == d)
+      return false;
+  }
+
+  constraint = Constraint(a, b, c, d, value);
+  constraint.setType(type);
+  if (ui->enableScan->isChecked()) {
+    constraint.setScan(ui->editScanInitial->value(), ui->editScanEnd->value(),
+                       ui->editScanSteps->value());
+  }
+
+  return true;
 }
 
 void ConstraintsDialog::changeType(int newType)
@@ -283,18 +424,36 @@ void ConstraintsDialog::changeType(int newType)
     ui->editValue->setSuffix("Å");
     ui->editValue->setMinimum(0.0);
     ui->editValue->setMaximum(1000.0);
+    ui->editScanInitial->setSuffix("Å");
+    ui->editScanInitial->setMinimum(0.0);
+    ui->editScanInitial->setMaximum(1000.0);
+    ui->editScanEnd->setSuffix("Å");
+    ui->editScanEnd->setMinimum(0.0);
+    ui->editScanEnd->setMaximum(1000.0);
     ui->comboType->setCurrentIndex(0);
   }
   else if (newType == 1) {
     ui->editValue->setSuffix("°");
     ui->editValue->setMinimum(0.0);
     ui->editValue->setMaximum(180.0);
+    ui->editScanInitial->setSuffix("°");
+    ui->editScanInitial->setMinimum(0.0);
+    ui->editScanInitial->setMaximum(180.0);
+    ui->editScanEnd->setSuffix("°");
+    ui->editScanEnd->setMinimum(0.0);
+    ui->editScanEnd->setMaximum(180.0);
     ui->comboType->setCurrentIndex(1);
   }
   else {
     ui->editValue->setSuffix("°");
     ui->editValue->setMinimum(-180.0);
     ui->editValue->setMaximum(180.0);
+    ui->editScanInitial->setSuffix("°");
+    ui->editScanInitial->setMinimum(-180.0);
+    ui->editScanInitial->setMaximum(180.0);
+    ui->editScanEnd->setSuffix("°");
+    ui->editScanEnd->setMinimum(-180.0);
+    ui->editScanEnd->setMaximum(180.0);
     ui->comboType->setCurrentIndex(2);
   }
 }
@@ -306,17 +465,34 @@ void ConstraintsDialog::acceptConstraints()
 
 void ConstraintsDialog::getConstraint()
 {
-  if (m_molecule == nullptr || m_molecule == nullptr)
+  if (m_molecule == nullptr)
     return;
 
-  // get the new constraints
+  auto* selectionModel = ui->constraintsTableView->selectionModel();
+  if (selectionModel == nullptr || !selectionModel->hasSelection())
+    return;
+
+  const auto row = m_model->currentRow;
+  if (row < 0)
+    return;
+
+  Constraint updatedConstraint(MaxIndex, MaxIndex, MaxIndex, MaxIndex, 0.0);
+  if (!buildConstraintFromEditor(updatedConstraint))
+    return;
+
+  m_model->setConstraint(row, updatedConstraint);
   m_molecule->setConstraints(m_model->constraints());
   m_molecule->emitChanged(Molecule::Constraints);
 }
 
+void ConstraintsDialog::loadConstraint()
+{
+  updateConstraints();
+}
+
 void ConstraintsDialog::deleteConstraint()
 {
-  if (m_molecule == nullptr || m_molecule == nullptr)
+  if (m_molecule == nullptr)
     return;
 
   auto row = ui->constraintsTableView->currentIndex().row();
@@ -336,61 +512,12 @@ void ConstraintsDialog::addConstraint()
   if (m_molecule == nullptr)
     return;
 
-  // TODO: Check user input for sanity
-  Constraint::Type type;
-  switch (ui->comboType->currentIndex()) {
-    case 1:
-      type = Constraint::AngleConstraint;
-      break;
-    case 2:
-      type = Constraint::TorsionConstraint;
-      break;
-    case 0:
-    default:
-      type = Constraint::DistanceConstraint;
-      break;
-  }
-  double value = ui->editValue->value();
-  int atomIdA = ui->editA->value();
-  int atomIdB = ui->editB->value();
-  int atomIdC = ui->editC->value();
-  int atomIdD = ui->editD->value();
-
-  Index a, b, c, d;
-  if (atomIdA < 1 || atomIdA > m_molecule->atomCount())
+  Constraint newConstraint(MaxIndex, MaxIndex, MaxIndex, MaxIndex, 0.0);
+  if (!buildConstraintFromEditor(newConstraint))
     return;
-  else
-    a = atomIdA - 1;
 
-  if (atomIdB < 1 || atomIdB > m_molecule->atomCount())
-    return;
-  else
-    b = atomIdB - 1;
-
-  if (atomIdC < 1 || atomIdC > m_molecule->atomCount())
-    c = MaxIndex;
-  else
-    c = atomIdC - 1;
-
-  if (atomIdD < 1 || atomIdD > m_molecule->atomCount())
-    d = MaxIndex;
-  else
-    d = atomIdD - 1;
-
-  if (type == Constraint::DistanceConstraint) {
-    if (a == b || value == 0.0)
-      return;
-  } else if (type == Constraint::AngleConstraint) {
-    if (a == b || b == c)
-      return;
-  } else if (type == Constraint::TorsionConstraint)
-    if (a == b || a == c || a == d || b == c || b == d || c == d)
-      return;
-
-  Constraint newConstraint(a, b, c, d, value);
-  newConstraint.setType(type);
   m_molecule->addConstraint(newConstraint);
-  m_model->addConstraint(type, a, b, c, d, value);
+  m_model->setConstraints(m_molecule->constraints());
   m_molecule->emitChanged(Molecule::Constraints);
 }
 

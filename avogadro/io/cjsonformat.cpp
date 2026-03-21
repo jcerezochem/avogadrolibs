@@ -34,6 +34,7 @@ using Core::Array;
 using Core::Atom;
 using Core::BasisSet;
 using Core::Bond;
+using Core::Constraint;
 using Core::CrystalTools;
 using Core::Cube;
 using Core::GaussianSet;
@@ -77,6 +78,48 @@ bool isBooleanArray(json& j)
   }
   return false;
 }
+
+bool isConstraintAtomArray(const json& atoms)
+{
+  if (!atoms.is_array() || atoms.size() < 2 || atoms.size() > 4) {
+    return false;
+  }
+
+  for (const auto& atom : atoms) {
+    if (!atom.is_number_integer() && !atom.is_number_unsigned()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void addConstraintWithOptionalScan(Molecule& molecule, Real value, Index a,
+                                   Index b, Index c = MaxIndex,
+                                   Index d = MaxIndex,
+                                   const json* scan = nullptr)
+{
+  Constraint newConstraint(a, b, c, d, value);
+
+  if (scan != nullptr && scan->is_object()) {
+    const auto initialIt = scan->find("initial");
+    const auto endIt = scan->find("end");
+    const auto stepsIt = scan->find("steps");
+    if (initialIt != scan->end() && endIt != scan->end() &&
+        stepsIt != scan->end() && initialIt->is_number() &&
+        endIt->is_number() &&
+        (stepsIt->is_number_integer() || stepsIt->is_number_unsigned())) {
+      const int steps = static_cast<int>(*stepsIt);
+      if (steps >= 2) {
+        newConstraint.setScan(static_cast<Real>(*initialIt),
+                              static_cast<Real>(*endIt), steps);
+      }
+    }
+  }
+
+  molecule.addConstraint(newConstraint);
+}
+
 
 json eigenColToJson(const MatrixX& matrix, int column)
 {
@@ -866,14 +909,44 @@ bool CjsonFormat::deserialize(std::istream& file, Molecule& molecule,
         if (isNumericArray(constraint)) {
           // value, atom1, atom2, atom3, atom4
           if (constraint.size() == 3) { // bond
-            molecule.addConstraint(constraint[0], constraint[1], constraint[2]);
+            addConstraintWithOptionalScan(
+              molecule, static_cast<Real>(constraint[0]),
+              static_cast<Index>(constraint[1]),
+              static_cast<Index>(constraint[2]));
           } else if (constraint.size() == 4) { // angle
-            molecule.addConstraint(constraint[0], constraint[1], constraint[2],
-                                   constraint[3]);
+            addConstraintWithOptionalScan(
+              molecule, static_cast<Real>(constraint[0]),
+              static_cast<Index>(constraint[1]),
+              static_cast<Index>(constraint[2]),
+              static_cast<Index>(constraint[3]));
           } else if (constraint.size() == 5) { // torsion
-            molecule.addConstraint(constraint[0], constraint[1], constraint[2],
-                                   constraint[3], constraint[4]);
+            addConstraintWithOptionalScan(
+              molecule, static_cast<Real>(constraint[0]),
+              static_cast<Index>(constraint[1]),
+              static_cast<Index>(constraint[2]),
+              static_cast<Index>(constraint[3]),
+              static_cast<Index>(constraint[4]));
           }
+        } else if (constraint.is_object()) {
+          const auto valueIt = constraint.find("value");
+          const auto atomsIt = constraint.find("atoms");
+          if (valueIt == constraint.end() || atomsIt == constraint.end() ||
+              !valueIt->is_number() || !isConstraintAtomArray(*atomsIt)) {
+            continue;
+          }
+
+          const json& atoms = *atomsIt;
+          const Real value = static_cast<Real>(*valueIt);
+          const Index a = static_cast<Index>(atoms[0]);
+          const Index b = static_cast<Index>(atoms[1]);
+          const Index c = atoms.size() > 2 ? static_cast<Index>(atoms[2])
+                                           : MaxIndex;
+          const Index d = atoms.size() > 3 ? static_cast<Index>(atoms[3])
+                                           : MaxIndex;
+          const auto scanIt = constraint.find("scan");
+          addConstraintWithOptionalScan(
+            molecule, value, a, b, c, d,
+            scanIt != constraint.end() ? &(*scanIt) : nullptr);
         }
       }
     }
@@ -1685,17 +1758,39 @@ bool CjsonFormat::serialize(std::ostream& file, const Molecule& molecule,
   if (!constraintList.empty()) {
     json constraints;
     for (auto& constraint : constraintList) {
-      json constraintEntry;
-      constraintEntry.push_back(constraint.value());
-      constraintEntry.push_back(constraint.aIndex());
-      constraintEntry.push_back(constraint.bIndex());
-      if (constraint.cIndex() != MaxIndex) {
-        constraintEntry.push_back(constraint.cIndex());
+      if (constraint.hasScan()) {
+        json constraintEntry;
+        json atoms = json::array();
+        atoms.push_back(constraint.aIndex());
+        atoms.push_back(constraint.bIndex());
+        if (constraint.cIndex() != MaxIndex) {
+          atoms.push_back(constraint.cIndex());
+        }
+        if (constraint.dIndex() != MaxIndex) {
+          atoms.push_back(constraint.dIndex());
+        }
+
+        constraintEntry["value"] = constraint.value();
+        constraintEntry["atoms"] = atoms;
+        constraintEntry["scan"] = {
+          { "initial", constraint.scanInitial() },
+          { "end", constraint.scanEnd() },
+          { "steps", constraint.scanSteps() },
+        };
+        constraints.push_back(constraintEntry);
+      } else {
+        json constraintEntry;
+        constraintEntry.push_back(constraint.value());
+        constraintEntry.push_back(constraint.aIndex());
+        constraintEntry.push_back(constraint.bIndex());
+        if (constraint.cIndex() != MaxIndex) {
+          constraintEntry.push_back(constraint.cIndex());
+        }
+        if (constraint.dIndex() != MaxIndex) {
+          constraintEntry.push_back(constraint.dIndex());
+        }
+        constraints.push_back(constraintEntry);
       }
-      if (constraint.dIndex() != MaxIndex) {
-        constraintEntry.push_back(constraint.dIndex());
-      }
-      constraints.push_back(constraintEntry);
     }
     root["constraints"] = constraints;
   }
