@@ -7,21 +7,28 @@
 
 #include <gtest/gtest.h>
 
+#include <avogadro/core/constraint.h>
 #include <avogadro/core/matrix.h>
 #include <avogadro/core/molecule.h>
 #include <avogadro/core/unitcell.h>
+#include <avogadro/core/vector.h>
 
 #include <avogadro/io/cjsonformat.h>
+
+#include <nlohmann/json.hpp>
 
 using Avogadro::MatrixX;
 using Avogadro::PI_F;
 using Avogadro::Real;
 using Avogadro::Core::Atom;
 using Avogadro::Core::Bond;
+using Avogadro::Core::Constraint;
 using Avogadro::Core::Molecule;
 using Avogadro::Core::UnitCell;
 using Avogadro::Core::Variant;
+using Avogadro::Vector3;
 using Avogadro::Io::CjsonFormat;
+using json = nlohmann::json;
 using namespace std::string_literals;
 
 TEST(CjsonTest, readFile)
@@ -326,4 +333,163 @@ TEST(CjsonTest, partialCharges)
   // check the charges on atoms
   EXPECT_EQ(mullikenCharges(0, 0), 0.16726);
   EXPECT_EQ(mullikenCharges(1, 0), -0.201292);
+}
+
+
+TEST(CjsonTest, ReadLegacyConstraintsWithoutScanMetadata)
+{
+  CjsonFormat cjson;
+  Molecule molecule;
+  const char* input = R"({"chemicalJson": 0,
+  "atoms": {
+    "coords": { "3d": [ 0.0, 0.0, 0.0, 1.5, 0.0, 0.0 ] },
+    "elements": { "number": [ 1, 1 ] }
+  },
+  "constraints": [ [ 1.5, 0, 1 ] ]
+})";
+
+  EXPECT_TRUE(cjson.readString(input, molecule)) << cjson.error();
+  ASSERT_EQ(molecule.constraints().size(), static_cast<size_t>(1));
+
+  const auto& constraint = molecule.constraints()[0];
+  EXPECT_DOUBLE_EQ(constraint.value(), 1.5);
+  EXPECT_EQ(constraint.aIndex(), 0);
+  EXPECT_EQ(constraint.bIndex(), 1);
+  EXPECT_FALSE(constraint.hasScan());
+  EXPECT_EQ(constraint.scanSteps(), 0);
+}
+
+TEST(CjsonTest, ReadObjectConstraintsWithScanMetadata)
+{
+  CjsonFormat cjson;
+  Molecule molecule;
+  const char* input = R"({"chemicalJson": 0,
+  "atoms": {
+    "coords": { "3d": [
+      0.0, 0.0, 0.0,
+      1.0, 0.0, 0.0,
+      1.0, 1.0, 0.0,
+      1.0, 1.0, 1.0
+    ] },
+    "elements": { "number": [ 6, 6, 6, 6 ] }
+  },
+  "constraints": [
+    {
+      "value": 180.0,
+      "atoms": [ 0, 1, 2, 3 ],
+      "scan": {
+        "initial": -180.0,
+        "end": 180.0,
+        "steps": 13
+      }
+    }
+  ]
+})";
+
+  EXPECT_TRUE(cjson.readString(input, molecule)) << cjson.error();
+  ASSERT_EQ(molecule.constraints().size(), static_cast<size_t>(1));
+
+  const auto& constraint = molecule.constraints()[0];
+  EXPECT_DOUBLE_EQ(constraint.value(), 180.0);
+  EXPECT_EQ(constraint.aIndex(), 0);
+  EXPECT_EQ(constraint.bIndex(), 1);
+  EXPECT_EQ(constraint.cIndex(), 2);
+  EXPECT_EQ(constraint.dIndex(), 3);
+  EXPECT_TRUE(constraint.hasScan());
+  EXPECT_DOUBLE_EQ(constraint.scanInitial(), -180.0);
+  EXPECT_DOUBLE_EQ(constraint.scanEnd(), 180.0);
+  EXPECT_EQ(constraint.scanSteps(), 13);
+}
+
+TEST(CjsonTest, ReadObjectConstraintsWithoutScanMetadata)
+{
+  CjsonFormat cjson;
+  Molecule molecule;
+  const char* input = R"({"chemicalJson": 0,
+  "atoms": {
+    "coords": { "3d": [
+      0.0, 0.0, 0.0,
+      1.0, 0.0, 0.0,
+      1.0, 1.0, 0.0
+    ] },
+    "elements": { "number": [ 6, 6, 6 ] }
+  },
+  "constraints": [
+    {
+      "value": 120.0,
+      "atoms": [ 0, 1, 2 ]
+    }
+  ]
+})";
+
+  EXPECT_TRUE(cjson.readString(input, molecule)) << cjson.error();
+  ASSERT_EQ(molecule.constraints().size(), static_cast<size_t>(1));
+
+  const auto& constraint = molecule.constraints()[0];
+  EXPECT_DOUBLE_EQ(constraint.value(), 120.0);
+  EXPECT_FALSE(constraint.hasScan());
+  EXPECT_EQ(constraint.scanSteps(), 0);
+}
+
+TEST(CjsonTest, WriteLegacyConstraintsWithoutScanMetadata)
+{
+  CjsonFormat cjson;
+  Molecule molecule;
+  molecule.addAtom(1).setPosition3d(Vector3(0.0, 0.0, 0.0));
+  molecule.addAtom(1).setPosition3d(Vector3(1.5, 0.0, 0.0));
+  molecule.addConstraint(1.5, 0, 1);
+
+  std::string cjsonStr;
+  EXPECT_TRUE(cjson.writeString(cjsonStr, molecule)) << cjson.error();
+
+  json root = json::parse(cjsonStr);
+  ASSERT_TRUE(root.contains("constraints"));
+  ASSERT_EQ(root["constraints"].size(), static_cast<size_t>(1));
+  EXPECT_TRUE(root["constraints"][0].is_array());
+  EXPECT_EQ(root["constraints"][0].size(), static_cast<size_t>(3));
+  EXPECT_EQ(root["constraints"][0][0], 1.5);
+  EXPECT_EQ(root["constraints"][0][1], 0);
+  EXPECT_EQ(root["constraints"][0][2], 1);
+}
+
+TEST(CjsonTest, WriteAndReadConstraintsWithScanMetadata)
+{
+  CjsonFormat cjson;
+  Molecule molecule;
+  molecule.addAtom(6).setPosition3d(Vector3(0.0, 0.0, 0.0));
+  molecule.addAtom(6).setPosition3d(Vector3(1.0, 0.0, 0.0));
+  molecule.addAtom(6).setPosition3d(Vector3(1.0, 1.0, 0.0));
+  molecule.addAtom(6).setPosition3d(Vector3(1.0, 1.0, 1.0));
+
+  Constraint constraint(0, 1, 2, 3, 180.0);
+  constraint.setScan(-180.0, 180.0, 13);
+  molecule.addConstraint(constraint);
+
+  std::string cjsonStr;
+  EXPECT_TRUE(cjson.writeString(cjsonStr, molecule)) << cjson.error();
+
+  json root = json::parse(cjsonStr);
+  ASSERT_TRUE(root.contains("constraints"));
+  ASSERT_EQ(root["constraints"].size(), static_cast<size_t>(1));
+  ASSERT_TRUE(root["constraints"][0].is_object());
+  EXPECT_EQ(root["constraints"][0]["value"], 180.0);
+  EXPECT_EQ(root["constraints"][0]["atoms"].size(), static_cast<size_t>(4));
+  EXPECT_EQ(root["constraints"][0]["scan"]["initial"], -180.0);
+  EXPECT_EQ(root["constraints"][0]["scan"]["end"], 180.0);
+  EXPECT_EQ(root["constraints"][0]["scan"]["steps"], 13);
+
+  Molecule roundTrip;
+  EXPECT_TRUE(cjson.readString(cjsonStr, roundTrip)) << cjson.error();
+  ASSERT_EQ(roundTrip.constraints().size(), static_cast<size_t>(1));
+
+  const auto& restored = roundTrip.constraints()[0];
+  EXPECT_DOUBLE_EQ(restored.value(), 180.0);
+  EXPECT_EQ(restored.aIndex(), 0);
+  EXPECT_EQ(restored.bIndex(), 1);
+  EXPECT_EQ(restored.cIndex(), 2);
+  EXPECT_EQ(restored.dIndex(), 3);
+  EXPECT_TRUE(restored.hasScan());
+  EXPECT_DOUBLE_EQ(restored.scanInitial(), -180.0);
+  EXPECT_DOUBLE_EQ(restored.scanEnd(), 180.0);
+  EXPECT_EQ(restored.scanSteps(), 13);
 }

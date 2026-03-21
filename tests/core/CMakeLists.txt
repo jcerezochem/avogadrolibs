@@ -6,6 +6,7 @@ set(tests
   AtomTyper
   BasisSet
   Bond
+  Constraint
   CoordinateBlockGenerator
   CoordinateSet
   Cube
