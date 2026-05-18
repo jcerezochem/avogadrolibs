@@ -581,6 +581,17 @@ bool InterfaceScript::insertMolecule(QJsonObject& json,
   // insert the spin multiplicity
   json.insert("spin", mol.totalSpinMultiplicity());
 
+  // Preserve the source file path when the molecule originated from a file.
+  // External tools such as spectrum viewers may need the original log/output
+  // path rather than a serialized molecular representation alone.
+  if (mol.hasData("fileName")) {
+    const std::string currentFilePath = mol.data("fileName").toString();
+    if (!currentFilePath.empty()) {
+      json.insert(QStringLiteral("currentFilePath"),
+                  QString::fromStdString(currentFilePath));
+    }
+  }
+
   Io::FileFormatManager& formats = Io::FileFormatManager::instance();
   QScopedPointer<Io::FileFormat> format(
     formats.newFormatFromFileExtension(m_moleculeExtension.toStdString()));

@@ -232,6 +232,21 @@ void Command::menuActivated()
   }
 
   widget->setMolecule(m_molecule);
+
+  if (m_molecule != nullptr && m_molecule->hasData("fileName")) {
+    const std::string currentFilePath = m_molecule->data("fileName").toString();
+    const QJsonObject opts = widget->interfaceScript().options();
+    const QJsonObject userOptions =
+      opts.value(QStringLiteral("userOptions")).toObject();
+    if (!currentFilePath.empty() &&
+        userOptions.contains(QStringLiteral("Log File"))) {
+      QJsonObject defaults;
+      defaults.insert(QStringLiteral("Log File"),
+                      QString::fromStdString(currentFilePath));
+      widget->applyOptions(defaults);
+    }
+  }
+
   m_currentInterface = widget;
   if (widget->isEmpty()) {
     run(); // no options, do it immediately
