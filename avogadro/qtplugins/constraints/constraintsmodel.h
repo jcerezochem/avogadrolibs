@@ -1,4 +1,4 @@
-/******************************************************************************
+/****************************************************************************
   This source file is part of the Avogadro project.
   This source code is released under the 3-Clause BSD License, (see "LICENSE").
 ******************************************************************************/
@@ -6,13 +6,13 @@
 #ifndef CONSTRAINTSMODEL_H
 #define CONSTRAINTSMODEL_H
 
-#include <QtCore/QObject>
-#include <QtCore/QList>
-#include <QtCore/QString>
 #include <QtCore/QAbstractTableModel>
+#include <QtCore/QList>
+#include <QtCore/QObject>
+#include <QtCore/QString>
 
-#include <avogadro/qtgui/molecule.h>
 #include <avogadro/core/constraint.h>
+#include <avogadro/qtgui/molecule.h>
 
 namespace Avogadro {
 namespace QtPlugins {
@@ -28,6 +28,9 @@ public:
   int rowCount(const QModelIndex& parent = QModelIndex()) const override;
   int columnCount(const QModelIndex& parent = QModelIndex()) const override;
   QVariant data(const QModelIndex& index, int role) const override;
+  bool setData(const QModelIndex& index, const QVariant& value,
+               int role = Qt::EditRole) override;
+  Qt::ItemFlags flags(const QModelIndex& index) const override;
   QVariant headerData(int section, Qt::Orientation orientation,
                       int role = Qt::DisplayRole) const override;
 
@@ -35,6 +38,7 @@ public:
   Core::Constraint constraint(int index);
   std::vector<Core::Constraint> constraints() { return m_constraints; }
   void addConstraint(int type, int a, int b, int c, int d, double value);
+  void setConstraint(int index, const Core::Constraint& constraint);
   void deleteConstraint(int index);
   void setConstraints(const std::vector<Core::Constraint>& constraints);
   int currentRow = -1;
@@ -43,6 +47,11 @@ public slots:
   void emitDataChanged();
 
 private:
+  QVariant formattedConstraintValue(const Core::Constraint& constraint,
+                                    int role) const;
+  bool updateScanData(Core::Constraint& constraint, int column,
+                      const QVariant& value);
+
   std::vector<Core::Constraint> m_constraints;
 
 }; // ConstraintsModel

@@ -32,6 +32,7 @@ public slots:
   void acceptConstraints();
   void addConstraint();
   void getConstraint();
+  void loadConstraint();
   void deleteConstraint();
   void deleteAllConstraints();
   void highlightSelected(const QModelIndex& newIndex,
@@ -40,6 +41,16 @@ public slots:
   void changeType(int type);
 
   void updateConstraints();
+
+private:
+  bool isScanMode() const;
+  void populateEditor(const Core::Constraint& constraint);
+  void resetScanEditor();
+  bool buildConstraintFromEditor(Core::Constraint& constraint) const;
+
+private slots:
+  void setScanMode(int mode);
+  void syncScanEditorValue(double value);
 
 private:
   Ui::ConstraintsDialog* ui;

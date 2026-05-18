@@ -1,4 +1,4 @@
-/******************************************************************************
+/****************************************************************************
   This source file is part of the Avogadro project.
   This source code is released under the 3-Clause BSD License, (see "LICENSE").
 ******************************************************************************/
@@ -70,6 +70,7 @@ public:
     m_cIndex = c;
     m_dIndex = d;
     m_value = value;
+    clearScan();
   }
 
   /**
@@ -83,6 +84,30 @@ public:
    * @return the constraint value
    */
   Real value() const { return m_value; }
+
+  bool hasScan() const { return m_scanSteps >= 2; }
+  Real scanInitial() const { return m_scanInitial; }
+  Real scanEnd() const { return m_scanEnd; }
+  int scanSteps() const { return m_scanSteps; }
+
+  void setScan(Real initial, Real end, int steps)
+  {
+    if (steps < 2) {
+      clearScan();
+      return;
+    }
+
+    m_scanInitial = initial;
+    m_scanEnd = end;
+    m_scanSteps = steps;
+  }
+
+  void clearScan()
+  {
+    m_scanInitial = 0.0;
+    m_scanEnd = 0.0;
+    m_scanSteps = 0;
+  }
 
   /**
    * @return the atoms in the constraint as a tuple
@@ -136,6 +161,9 @@ protected:
   Index m_dIndex = MaxIndex;
   Real m_value = 0.0;
   Real m_k = 41840.0; // force constant, default in kJ/mol/Angstrom^2
+  Real m_scanInitial = 0.0;
+  Real m_scanEnd = 0.0;
+  int m_scanSteps = 0;
   mutable Constraint::Type m_type = None; // cached type, initialized to None
 };
 
