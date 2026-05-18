@@ -250,54 +250,64 @@ bool InterfaceScript::processCommand(Core::Molecule* mol)
       }
     }
 
-    m_moleculeExtension = "cjson";
-    if (obj.contains("moleculeFormat") && obj["moleculeFormat"].isString()) {
-      m_moleculeExtension = obj["moleculeFormat"].toString();
-    }
-
-    Io::FileFormatManager& formats = Io::FileFormatManager::instance();
-    QScopedPointer<Io::FileFormat> format(
-      formats.newFormatFromFileExtension(m_moleculeExtension.toStdString()));
-
-    if (format.isNull()) {
-      m_errors << tr("Error reading molecule representation: "
-                     "Unrecognized file format: %1")
-                    .arg(m_moleculeExtension);
-      return false;
-    }
-
     auto* guiMol = static_cast<QtGui::Molecule*>(mol);
-    QtGui::Molecule newMol(guiMol->parent());
-    if (m_moleculeExtension == "cjson") {
-      // convert the "cjson" field to a string
-      QJsonObject cjsonObj = obj["cjson"].toObject();
-      QJsonDocument doc2(cjsonObj);
-      QString strCJSON(doc2.toJson(QJsonDocument::Compact));
-      if (!strCJSON.isEmpty()) {
-        result = format->readString(strCJSON.toStdString(), newMol);
+    const bool hasCjsonPayload =
+      obj.contains("cjson") && obj["cjson"].isObject();
+    const bool hasExplicitFormat =
+      obj.contains("moleculeFormat") && obj["moleculeFormat"].isString();
+
+    // Message-only commands are valid and should not mutate the current
+    // molecule. This is useful for launcher-style commands that start an
+    // external UI and only report success/failure back to Avogadro.
+    if (hasCjsonPayload || hasExplicitFormat) {
+      m_moleculeExtension = "cjson";
+      if (hasExplicitFormat)
+        m_moleculeExtension = obj["moleculeFormat"].toString();
+
+      Io::FileFormatManager& formats = Io::FileFormatManager::instance();
+      QScopedPointer<Io::FileFormat> format(
+        formats.newFormatFromFileExtension(m_moleculeExtension.toStdString()));
+
+      if (format.isNull()) {
+        m_errors << tr("Error reading molecule representation: "
+                       "Unrecognized file format: %1")
+                      .arg(m_moleculeExtension);
+        return false;
       }
-    } else if (obj.contains(m_moleculeExtension) &&
-               obj[m_moleculeExtension].isString()) {
-      QString strFile = obj[m_moleculeExtension].toString();
-      result = format->readString(strFile.toStdString(), newMol);
-    }
 
-    // check if the script wants us to perceive bonds first
-    if (obj["bond"].toBool()) {
-      newMol.perceiveBondsSimple();
-      newMol.perceiveBondOrders();
-    }
+      QtGui::Molecule newMol(guiMol->parent());
+      if (m_moleculeExtension == "cjson") {
+        // convert the "cjson" field to a string
+        QJsonObject cjsonObj = obj["cjson"].toObject();
+        QJsonDocument doc2(cjsonObj);
+        QString strCJSON(doc2.toJson(QJsonDocument::Compact));
+        if (!strCJSON.isEmpty()) {
+          result = format->readString(strCJSON.toStdString(), newMol);
+        }
+      } else if (obj.contains(m_moleculeExtension) &&
+                 obj[m_moleculeExtension].isString()) {
+        QString strFile = obj[m_moleculeExtension].toString();
+        result = format->readString(strFile.toStdString(), newMol);
+      }
 
-    // how do we handle this result?
-    if (obj["readProperties"].toBool()) {
-      guiMol->readProperties(newMol);
-      guiMol->emitChanged(Molecule::Properties | Molecule::Added);
-    } else if (obj["append"].toBool()) {
-      guiMol->undoMolecule()->appendMolecule(newMol, m_displayName);
-    } else { // replace the whole molecule
-      Molecule::MoleculeChanges changes = (Molecule::Atoms | Molecule::Bonds |
-                                           Molecule::Added | Molecule::Removed);
-      guiMol->undoMolecule()->modifyMolecule(newMol, changes, m_displayName);
+      // check if the script wants us to perceive bonds first
+      if (obj["bond"].toBool()) {
+        newMol.perceiveBondsSimple();
+        newMol.perceiveBondOrders();
+      }
+
+      // how do we handle this result?
+      if (obj["readProperties"].toBool()) {
+        guiMol->readProperties(newMol);
+        guiMol->emitChanged(Molecule::Properties | Molecule::Added);
+      } else if (obj["append"].toBool()) {
+        guiMol->undoMolecule()->appendMolecule(newMol, m_displayName);
+      } else { // replace the whole molecule
+        Molecule::MoleculeChanges changes =
+          (Molecule::Atoms | Molecule::Bonds | Molecule::Added |
+           Molecule::Removed);
+        guiMol->undoMolecule()->modifyMolecule(newMol, changes, m_displayName);
+      }
     }
 
     // select some atoms
