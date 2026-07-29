@@ -11,8 +11,6 @@ on: [push, pull_request, workflow_dispatch]
 
 env:
   QT_VERSION: 6.8.3
-  # this is different from MACOSX_DEPLOYMENT_TARGET to prevent build problems
-  # we set MACOSX_DEPLOYMENT_TARGET later
   FEATURES: -DBUILD_GPL_PLUGINS=ON -DWITH_COORDGEN=OFF -DQT_VERSION=6 -DUSE_3DCONNEXION=OFF -DBUILD_MOLEQUEUE=OFF
 
 concurrency:
@@ -47,7 +45,7 @@ jobs:
 
     steps:
     - name: Checkout workflow repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Checkout Repositories
       uses: ./.github/actions/checkout-repositories
@@ -82,7 +80,7 @@ jobs:
     # Restore vcpkg cache (use manifest lock if available)
     - name: Restore vcpkg cache
       if: runner.os == 'Windows'
-      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           C:\vcpkg\installed
@@ -112,13 +110,11 @@ jobs:
 
     # Cache thirdparty builds (OpenBabel, etc.)
     - name: Cache thirdparty
-      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ${{ runner.workspace }}/build/Downloads
         key: thirdparty-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('openchemistry/cmake/External*.cmake', 'openchemistry/cmake/projects/*.cmake') }}
-        restore-keys: |
-          thirdparty-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Build
       run: |
